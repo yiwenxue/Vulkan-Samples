@@ -138,14 +138,14 @@ void Instancing::load_assets()
 	models.rock   = load_model("scenes/rock.gltf");
 	models.planet = load_model("scenes/planet.gltf");
 
-	//models.rock.loadFromFile(getAssetPath() + "scenes/rock.gltf", device.get(), queue);
-	//models.planet.loadFromFile(getAssetPath() + "scenes/planet.gltf", device.get(), queue);
+	// models.rock.loadFromFile(getAssetPath() + "scenes/rock.gltf", device.get(), queue);
+	// models.planet.loadFromFile(getAssetPath() + "scenes/planet.gltf", device.get(), queue);
 
 	textures.rocks  = load_texture_array("textures/texturearray_rocks_color_rgba.ktx");
 	textures.planet = load_texture("textures/lavaplanet_color_rgba.ktx");
 
-	//textures.rocks.loadFromFile(getAssetPath() + "textures/texturearray_rocks_color_rgba.ktx", device.get(), queue);
-	//textures.planet.loadFromFile(getAssetPath() + "textures/lavaplanet_color_rgba.ktx", device.get(), queue);
+	// textures.rocks.loadFromFile(getAssetPath() + "textures/texturearray_rocks_color_rgba.ktx", device.get(), queue);
+	// textures.planet.loadFromFile(getAssetPath() + "textures/lavaplanet_color_rgba.ktx", device.get(), queue);
 }
 
 void Instancing::setup_descriptor_pool()

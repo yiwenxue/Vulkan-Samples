@@ -85,6 +85,26 @@ void Camera::set_rotation(const glm::vec3 &rotation)
 void Camera::rotate(const glm::vec3 &delta)
 {
 	this->rotation += delta;
+	if (this->rotation.x > 90)
+	{
+		this->rotation.x = 90 - 0.00001f;
+	}
+
+	if (this->rotation.x < -90)
+	{
+		this->rotation.x = -90 + 0.00001f;
+	}
+
+	if (this->rotation.y > 360)
+	{
+		this->rotation.y = 0;
+	}
+
+	if (this->rotation.y < -360)
+	{
+		this->rotation.y = 0;
+	}
+
 	update_view_matrix();
 }
 

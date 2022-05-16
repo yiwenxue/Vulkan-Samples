@@ -16,8 +16,8 @@
  */
 
 /*
-  * Compute shader N-body simulation using two passes and shared compute shader memory
-  */
+ * Compute shader N-body simulation using two passes and shared compute shader memory
+ */
 
 #include "compute_nbody.h"
 
@@ -848,7 +848,7 @@ bool ComputeNBody::prepare(vkb::Platform &platform)
 	// Not all implementations support a work group size of 256, so we need to check with the device limits
 	work_group_size = std::min((uint32_t) 256, (uint32_t) get_device().get_gpu().get_properties().limits.maxComputeWorkGroupSize[0]);
 	// Same for shared data size for passing data between shader invocations
-	shared_data_size = std::min((uint32_t) 1024, (uint32_t)(get_device().get_gpu().get_properties().limits.maxComputeSharedMemorySize / sizeof(glm::vec4)));
+	shared_data_size = std::min((uint32_t) 1024, (uint32_t) (get_device().get_gpu().get_properties().limits.maxComputeSharedMemorySize / sizeof(glm::vec4)));
 
 	load_assets();
 	setup_descriptor_pool();

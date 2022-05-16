@@ -50,7 +50,7 @@ void Application::step()
 		delta_time = 0.01667f;
 	}
 
-	if (focus || benchmark_mode)
+	if (/*focus*/ true || benchmark_mode)
 	{
 		update(delta_time);
 	}

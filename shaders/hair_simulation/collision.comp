@@ -1,0 +1,60 @@
+layout(std430, binding = 0) buffer OldPositions {
+    vec4 pos[];
+} oldPositions;
+
+layout(std430, binding = 1) buffer NewPositions {
+    vec4 pos[];
+} newPosition;
+
+layout(std430, binding = 2) buffer PBody {
+    vec4 pos[];
+} pBody;
+
+layout(std430, binding = 3) buffer BodyTriangles {
+    vec4 idx[];
+} bodyTriangles;
+
+layout(local_size_x = WORK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+float collisionDist(vec3 p, vec3 v0, vec3 v1, vec3 v2) {
+    vec3 u, v, n;
+    vec3 w0, w;
+    float r, a, b;
+    u = v0 - v1;
+    v = v2 - v1;
+    return r;
+}
+
+
+void main() {
+    uint idx = gl_GlobalInvocationID;
+    if (idx > NUM_OF_POS) { return ;}
+
+    int numCollision = 0;
+
+    vec3 oldPos = oldPositions[idx];
+    vec3 newPos = newPositions[idx];
+    vec3 dir = normalize(newPos - oldPos);
+
+    vec3 surfaceID;
+
+    for (int i = 0; i < numberTriangles; i++) {
+        vec3 surfaceIdx = bodyTriangles[i].xyz;
+        vec3 v0 = pBody[int(idx.x)].xyz;
+        vec3 v1 = pBody[int(idx.y)].xyz;
+        vec3 v2 = pBody[int(idx.z)].xyz;
+
+        vec3 norm = normalize(cross(v0-v1, v2 - v1));
+
+        float d = collisionDist(newPos, v0, norm);
+
+        if (d < 0) {
+            numCollision += 1;
+            surfaceID = 
+        }
+    }
+
+    if (numCollision % 2 != 0) {
+
+    }
+}

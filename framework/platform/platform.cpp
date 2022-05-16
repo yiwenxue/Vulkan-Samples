@@ -115,7 +115,7 @@ void Platform::run()
 		}
 	}
 
-	if (active_app->is_focused() || active_app->is_benchmark_mode())
+	if (/*active_app->is_focused()*/ true || active_app->is_benchmark_mode())
 	{
 		active_app->step();
 		remaining_benchmark_frames--;

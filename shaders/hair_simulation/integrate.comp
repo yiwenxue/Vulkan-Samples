@@ -1,0 +1,225 @@
+#version 320 es
+
+#define NUM_STRAND 3000
+#define STRAND_LENGTH 20
+#define WORK_GROUP_SIZE 128
+#define COLLIDER_LENGTH 6
+
+#define GRID_DIMENSION 8
+#define GRID_RESOLUTION 50
+
+struct Particle {
+    vec4 pos;
+    vec4 oldpos;
+    vec4 velc;
+};
+
+struct Collider {
+	mat4 transform;
+	mat4 inv;
+	mat4 invTrans;
+};
+
+struct GridStruct {
+    vec4 pos;
+    vec4 vel;
+};
+
+layout(set = 0, binding = 0) uniform GlobalUniform {
+    mat4 view;
+    mat4 projection;
+    vec4 view_dir;
+} global_uniform;
+
+layout(set = 0, binding = 1) uniform TimeUniform {
+    float deltaTime;
+    float totalTime;
+};
+
+layout(set = 1, binding = 0) uniform LocalUniform {
+    mat4 model;
+} local_uniform;
+
+layout(set = 2, binding = 0) buffer InitPos {
+    vec4 init_pos[];
+};
+
+layout(set = 2, binding = 1) buffer Pos {
+    vec4 cur_pos[];
+};
+
+layout(set = 2, binding = 2) buffer OldPos {
+    vec4 old_pos[];
+};
+
+layout(set = 3, binding = 0) buffer GridData {
+    GridStruct grid_data[];
+};
+
+layout(set = 4, binding = 0) uniform HairParameters {
+	float stiffness;
+	float damping;
+	float gravityfactor;
+	float timefactor;
+} hair_parameter;
+
+layout(set = 5, binding = 0) buffer Colliders {
+    Collider colliders[];
+};
+
+// layout(set = 1, binding = 1) buffer AeroGrid {
+//     vec4 aerogrid[];
+// };
+// 
+// layout(set = 1, binding = 2) buffer VelGrid {
+//     vec4 velgrid[];
+// };
+
+layout(local_size_x = WORK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+
+bool isMovable(vec4 point) {
+    return point.w > 0.0;
+}
+
+void solveDistanceConstanint(int index0, int index1, float targetDistance) {
+    vec4 p0 = cur_pos[index0];
+	vec4 p1 = cur_pos[index1];
+
+	vec3 delta = p1.xyz - p0.xyz;
+	float distance = max(length(delta), 1e-7);
+	float stretching = 1.0 - targetDistance / distance;
+	delta = delta * stretching;
+	vec2 multiplier = vec2(0.0, 0.0);
+
+    if(isMovable(p0)) {
+	    multiplier = isMovable(p1) ? vec2(0.5, 0.5) : vec2(1.0, 0.0);
+	}
+	else {
+	    multiplier =  isMovable(p1) ? vec2(0.0, 1.0) : vec2(0.0, 0.0);
+	}
+
+    if (dot(multiplier, multiplier) > 0.0) {
+        cur_pos[index0].xyz += multiplier[0] * delta;
+	    cur_pos[index1].xyz -= multiplier[1] * delta;
+    }
+}
+
+bool EllipsoidCollision(Collider c, vec3 point) {
+	vec4 transformedPoint = c.inv * vec4(point, 1.0);
+	return (distance(transformedPoint.xyz, vec3(0.0)) <= 1.0);
+}
+
+vec3 GetEllipsoidNormal(Collider c, vec3 point) {
+	vec3 normal = vec3(c.inv * vec4(point, 1.0));
+	return normalize(vec3(c.invTrans * vec4(normal, 0.0)));
+}
+
+vec3 GetPointOnEllipsoid(Collider c, vec3 point) {
+	vec3 transformedPoint = normalize(vec3(c.inv * vec4(point, 1.0)));
+	return vec3(c.transform * vec4(transformedPoint, 1.0));
+}
+
+void main() {
+	int threadIdx = int(gl_GlobalInvocationID.x);
+
+    if (threadIdx > int(NUM_STRAND)) {
+        //return;
+    }
+
+    vec4 gravity = hair_parameter.gravityfactor * vec4(0.f, 9.8f, 0.f, 0.f);
+
+    int idx = threadIdx * int(STRAND_LENGTH);
+
+    float dt = deltaTime * hair_parameter.timefactor;
+
+    float damping = hair_parameter.damping;
+	float stiffness = hair_parameter.stiffness;
+
+    barrier();
+
+    int grid_len = int(GRID_RESOLUTION) * int(GRID_RESOLUTION) * int(GRID_RESOLUTION);
+    if (threadIdx == 0) {
+        for (int i = 0; i < grid_len; i++) {
+            grid_data[i].vel = vec4(0.0f);
+        }
+    }
+
+    barrier();
+
+    for (int i = 1; i < STRAND_LENGTH; i++) {
+
+        vec4 curPos = cur_pos[idx + i];
+        vec4 oldPos = old_pos[idx + i];
+
+        vec4 acc = gravity; // + calculateWindForce(curPos) + calculateFriction(curPos) + calculateVolumetric(curPos);
+
+        vec4 penalty = vec4(0.0);
+        for (int j = 0; j < COLLIDER_LENGTH; j++) {
+            Collider c = colliders[j];
+            if (EllipsoidCollision(c, curPos.xyz)) {
+                float k = 1900.0; // spring constant, as large as possible without exploding
+                float d = distance(GetPointOnEllipsoid(c, curPos.xyz), curPos.xyz);
+                vec3 normal = normalize(GetEllipsoidNormal(c, curPos.xyz)); // normal of collision surface at point of collision
+                penalty += vec4(k * d * normal, 1.0); // penalty spring force
+            }
+        }
+        acc = acc + penalty;
+
+        vec4 newPos = curPos +  (1.0 - damping) * (curPos - oldPos) + acc * dt * dt;
+        cur_pos[idx + i] = newPos;
+        old_pos[idx + i] = curPos;
+    }
+
+    // barrier();
+
+    // local shape
+
+    barrier();
+
+    // constraint
+    float local_distance = 0.0;
+    int local_idx = idx;
+    for (int i = 0; i < 10; i++) {
+        for (int j = 1; j < STRAND_LENGTH; j++) {
+            local_idx = idx + j;
+            local_distance = length(vec4(init_pos[local_idx] - init_pos[local_idx - 1]).xyz);
+            if (j % 2 == 0) {
+                solveDistanceConstanint(local_idx - 1, local_idx, local_distance);
+            }
+        }
+        for (int j = 1; j < STRAND_LENGTH; j++) {
+            local_idx = idx + j;
+            local_distance = length(vec4(init_pos[local_idx] - init_pos[local_idx - 1]).xyz);
+            if (j % 2 == 1) {
+                solveDistanceConstanint(local_idx - 1, local_idx, local_distance);
+            }
+        }
+    }
+
+    barrier();
+
+    idx = threadIdx * int(STRAND_LENGTH);
+    float step = float(GRID_DIMENSION) / float(GRID_RESOLUTION);
+    vec3 origin_pos = vec3(-4.0, -2.0, -4.0);
+
+    for (int i = 0; i < STRAND_LENGTH; i++) {
+        vec3 pos = cur_pos[idx + i].xyz - origin_pos;
+        int x = int(floor(pos.x / step));
+        int y = int(floor(pos.y / step));
+        int z = int(floor(pos.z / step));
+        int grid_idx = (z * GRID_RESOLUTION + y) * GRID_RESOLUTION + x;
+        vec3 velc = (cur_pos[idx + i] - old_pos[idx + i]).xyz * (1.0 / dt);
+
+        grid_data[grid_idx].vel.w += 1.0;
+        grid_data[grid_idx].vel.xyz = velc;
+    }
+
+    barrier();
+
+    // calculate force
+    // integrate position
+    // collision detect
+    // collision resolve
+    // grid velicity smooth
+    // fill new velgrid & volumegrid;
+}
