@@ -47,6 +47,9 @@ class Camera
 	glm::vec3 rotation = glm::vec3();
 	glm::vec3 position = glm::vec3();
 
+	glm::vec3 model_rotation = glm::vec3();
+	glm::vec3 model_position = glm::vec3();
+
 	float rotation_speed    = 1.0f;
 	float translation_speed = 1.0f;
 

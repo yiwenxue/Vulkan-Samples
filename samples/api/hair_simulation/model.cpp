@@ -1,6 +1,7 @@
 #include "model.h"
 #include "api_vulkan_sample.h"
 #include "glm/detail/type_mat.hpp"
+#include "glm/gtc/quaternion.hpp"
 #include "obj_loader.h"
 #include "tiny_obj_loader.h"
 #include "util.h"
@@ -8,6 +9,7 @@
 #include "vulkan/vulkan_core.h"
 #include <cstdlib>
 #include <memory>
+#include <ostream>
 #include <vector>
 
 namespace hair_system
@@ -337,58 +339,9 @@ uint32_t generate_hair_root(std::string file_name, std::vector<glm::vec3> &pos, 
 }
 
 Hair::Hair(vkb::Device *device, VkDescriptorPool pool, std::string file_name) :
-    device(device)
+    device(device), filename(file_name)
 {
-	std::vector<glm::vec3> pos;
-	std::vector<glm::vec3> norm;
-
-	numStrands = generate_hair_root(file_name, pos, norm, numStrands);
-
-	Particle particle{};
-
-	float dLength = hairLength / strandLength;
-
-	uint32_t point_num = numStrands * strandLength;
-
-	for (int i = 0; i < numStrands; i++)
-	{
-		Strand strand;
-		// static point
-		glm::vec4 dir = glm::vec4(norm[i], 0.0);
-		dir[2] -= 2.0f;
-		dir[1] += 5.0f;
-		dir[0] += 0.05f;
-
-		dir = glm::normalize(dir);
-
-		particle.pos     = glm::vec4(pos[i], 0.0);
-		particle.old_pos = glm::vec4(pos[i], 0.0);
-		particle.velc    = glm::vec4(0.0);
-
-		strand.mass_particle.resize(strandLength);
-		strand.mass_particle[0] = particle;
-
-		new_pos.push_back(particle.pos);
-		old_pos.push_back(particle.old_pos);
-		velc.push_back(glm::vec4(0.0));
-
-		// // dynamic point
-		particle.pos.w     = 1.0;
-		particle.old_pos.w = 1.0;
-
-		for (int j = 1; j < strandLength; j++)
-		{
-			particle.pos            = particle.pos + dir * dLength;
-			particle.old_pos        = particle.pos;
-			strand.mass_particle[j] = particle;
-
-			new_pos.push_back(particle.pos);
-			old_pos.push_back(particle.old_pos);
-			velc.push_back(particle.velc);
-		}
-
-		strands.push_back(std::move(strand));
-	}
+	genStraightHair();
 
 	// build strand buffer
 	init_pos_buffer = std::make_unique<vkb::core::Buffer>(
@@ -436,50 +389,8 @@ Hair::Hair(vkb::Device *device, VkDescriptorPool pool, std::string file_name) :
 	auto queue = device->get_queue_by_flags(VK_QUEUE_GRAPHICS_BIT, 0);
 
 	VkDeviceSize buffer_size;
-	// staging buffer
-	{
-		VkCommandBuffer copy_command = device->create_command_buffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-		VkBufferCopy    copy_region  = {};
-		buffer_size                  = new_pos.size() * sizeof(glm::vec4);
-		copy_region.size             = buffer_size;
-		vkb::core::Buffer staging_buffer{*device, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-		staging_buffer.update(new_pos.data(), buffer_size);
-		vkCmdCopyBuffer(copy_command, staging_buffer.get_handle(), init_pos_buffer->get_handle(), 1, &copy_region);
-		device->flush_command_buffer(copy_command, queue.get_handle(), true);
-	}
-
-	{
-		VkCommandBuffer copy_command = device->create_command_buffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-		VkBufferCopy    copy_region  = {};
-		buffer_size                  = new_pos.size() * sizeof(glm::vec4);
-		copy_region.size             = buffer_size;
-		vkb::core::Buffer staging_buffer{*device, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-		staging_buffer.update(new_pos.data(), buffer_size);
-		vkCmdCopyBuffer(copy_command, staging_buffer.get_handle(), pos_buffer->get_handle(), 1, &copy_region);
-		device->flush_command_buffer(copy_command, queue.get_handle(), true);
-	}
-
-	{
-		VkCommandBuffer copy_command = device->create_command_buffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-		VkBufferCopy    copy_region  = {};
-		buffer_size                  = old_pos.size() * sizeof(glm::vec4);
-		copy_region.size             = buffer_size;
-		vkb::core::Buffer staging_buffer{*device, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-		staging_buffer.update(old_pos.data(), buffer_size);
-		vkCmdCopyBuffer(copy_command, staging_buffer.get_handle(), old_pos_buffer->get_handle(), 1, &copy_region);
-		device->flush_command_buffer(copy_command, queue.get_handle(), true);
-	}
-
-	{
-		VkCommandBuffer copy_command = device->create_command_buffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
-		VkBufferCopy    copy_region  = {};
-		buffer_size                  = velc.size() * sizeof(glm::vec4);
-		copy_region.size             = buffer_size;
-		vkb::core::Buffer staging_buffer{*device, buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY};
-		staging_buffer.update(velc.data(), buffer_size);
-		vkCmdCopyBuffer(copy_command, staging_buffer.get_handle(), velc_buffer->get_handle(), 1, &copy_region);
-		device->flush_command_buffer(copy_command, queue.get_handle(), true);
-	}
+	// upload buffer
+	Hair::reset();
 
 	indirect_data.first_vertex   = 0;
 	indirect_data.vertex_count   = numStrands;
@@ -620,6 +531,165 @@ void Hair::updateUBO()
 	hair_ubo->convert_and_update(hair_data);
 }
 
+void Hair::genStraightHair()
+{
+	new_pos.clear();
+	old_pos.clear();
+	strands.clear();
+	velc.clear();
+
+	std::vector<glm::vec3> pos;
+	std::vector<glm::vec3> norm;
+
+	numStrands = generate_hair_root(filename, pos, norm, numStrands);
+
+	Particle particle{};
+
+	float dLength = hairLength / strandLength;
+
+	uint32_t point_num = numStrands * strandLength;
+
+	for (int i = 0; i < numStrands; i++)
+	{
+		Strand strand;
+		// static point
+		glm::vec4 dir = glm::vec4(norm[i], 0.0);
+		dir[2] -= 2.0f;
+		dir[1] += 5.0f;
+		dir[0] += 0.05f;
+		dir = glm::normalize(dir);
+
+		particle.pos     = glm::vec4(pos[i], 0.0);
+		particle.old_pos = glm::vec4(pos[i], 0.0);
+		particle.velc    = glm::vec4(0.0);
+
+		strand.mass_particle.resize(strandLength);
+		strand.mass_particle[0] = particle;
+
+		new_pos.push_back(particle.pos);
+		old_pos.push_back(particle.old_pos);
+		velc.push_back(glm::vec4(0.0));
+
+		// // dynamic point
+		particle.pos.w     = 1.0;
+		particle.old_pos.w = 1.0;
+
+		particle.pos     = particle.pos + dir * dLength;
+		particle.old_pos = particle.pos;
+
+		new_pos.push_back(particle.pos);
+		old_pos.push_back(particle.old_pos);
+		velc.push_back(glm::vec4(0.0));
+
+		for (int j = 2; j < strandLength; j++)
+		{
+			particle.pos            = particle.pos + dir * dLength;
+			particle.old_pos        = particle.pos;
+			strand.mass_particle[j] = particle;
+
+			new_pos.push_back(particle.pos);
+			old_pos.push_back(particle.old_pos);
+			velc.push_back(particle.velc);
+		}
+
+		strands.push_back(std::move(strand));
+	}
+}
+
+void Hair::genCurlyHair()
+{
+	new_pos.clear();
+	old_pos.clear();
+	velc.clear();
+	strands.clear();
+
+	std::vector<glm::vec3> pos;
+	std::vector<glm::vec3> norm;
+
+	numStrands = generate_hair_root(filename, pos, norm, numStrands);
+
+	Particle particle{};
+
+	float dLength = hairLength / strandLength;
+
+	uint32_t point_num = numStrands * strandLength;
+
+	float drotate = M_PI / 5.0;
+	float dradius = 0.1;
+
+	glm::vec3 zAxis = glm::vec3(0.0, 0.0, 1.0);
+	glm::vec4 R;
+	glm::mat4 rotation;
+
+	for (int i = 0; i < numStrands; i++)
+	{
+		Strand strand;
+		// static point
+		glm::vec4 dir = glm::vec4(norm[i], 0.0);
+		dir[2] -= 2.0f;
+		dir[1] += 5.0f;
+		dir[0] += 0.05f;
+		dir      = glm::normalize(dir);
+		rotation = glm::mat4(1.0);
+
+		rotation = glm::rotate(drotate, glm::vec3(dir.xyz));
+
+		R = glm::vec4(glm::normalize(glm::cross(zAxis, glm::vec3(dir.xyz))), 1.0) * glm::vec4(dradius);
+
+		if (i == 0)
+		{
+			std::cout << "normal dir: " << dir.x << "," << dir.y << "," << dir.z << std::endl;
+			std::cout << "rotate matrix: ";
+			std::cout << std::endl;
+			std::cout << "rotation Vec: " << R.x << "," << R.y << "," << R.z << std::endl;
+		}
+
+		particle.pos     = glm::vec4(pos[i], 0.0);
+		particle.old_pos = glm::vec4(pos[i], 0.0);
+		particle.velc    = glm::vec4(0.0);
+
+		strand.mass_particle.resize(strandLength);
+		strand.mass_particle[0] = particle;
+
+		new_pos.push_back(particle.pos);
+		old_pos.push_back(particle.old_pos);
+		velc.push_back(glm::vec4(0.0));
+
+		// // dynamic point
+		particle.pos.w     = 1.0;
+		particle.old_pos.w = 1.0;
+
+		particle.pos     = particle.pos + dir * dLength;
+		particle.old_pos = particle.pos;
+
+		new_pos.push_back(particle.pos);
+		old_pos.push_back(particle.old_pos);
+		velc.push_back(glm::vec4(0.0));
+
+		for (int j = 2; j < strandLength; j++)
+		{
+			particle.pos     = particle.pos + dir * dLength;
+			particle.old_pos = particle.pos;
+
+			R = rotation * R;
+
+			if (i == 0)
+			{
+				std::cout << "rotation Vec: " << R.x << "," << R.y << "," << R.z << std::endl;
+			}
+
+			new_pos.push_back(particle.pos + R);
+			old_pos.push_back(new_pos.back());
+			velc.push_back(particle.velc);
+
+			strand.mass_particle[j].pos     = new_pos.back();
+			strand.mass_particle[j].old_pos = new_pos.back();
+		}
+
+		strands.push_back(std::move(strand));
+	}
+}
+
 void Hair::reset()
 {
 	auto queue = device->get_queue_by_flags(VK_QUEUE_GRAPHICS_BIT, 0);
@@ -721,15 +791,6 @@ GridStruct::GridStruct(vkb::Device *device, VkDescriptorPool pool, glm::vec3 pos
 				cells.push_back({glm::vec4(pos * dimensions + position, 0.0), glm::vec4(1.0)});
 			}
 		}
-	}
-
-	uint32_t count = total_number / 5;
-
-	srand(8);
-	for (int i = 0; i < count; i++)
-	{
-		uint32_t idx     = rand() % total_number;
-		cells[idx].pos.w = 1.0;
 	}
 
 	model_matrix = glm::scale(step * dimensions);

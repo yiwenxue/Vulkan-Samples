@@ -1,12 +1,22 @@
-#version 320 es
+#version 450
 
-#define NUM_STRAND 3000
+#extension GL_EXT_shader_atomic_float : require
+
+#define WORK_GROUP_SIZE_X 256
+#define WORK_GROUP_SIZE_Y 1
+#define WORK_GROUP_SIZE_Z 1
+
+#define NUM_STRAND 5120
 #define STRAND_LENGTH 20
-#define WORK_GROUP_SIZE 128
 #define COLLIDER_LENGTH 6
+
+#define LOCAL_SHAPE_LOOP_NUM 20
+#define LENGTH_LOOP_NUM 10
 
 #define GRID_DIMENSION 8
 #define GRID_RESOLUTION 50
+
+#define MAX_ITERATE_NUM 100
 
 struct Particle {
     vec4 pos;
@@ -58,27 +68,114 @@ layout(set = 3, binding = 0) buffer GridData {
 
 layout(set = 4, binding = 0) uniform HairParameters {
 	float stiffness;
+	float friction;
 	float damping;
 	float gravityfactor;
 	float timefactor;
+	float windspeed;
+	float volume;
 } hair_parameter;
 
 layout(set = 5, binding = 0) buffer Colliders {
     Collider colliders[];
 };
 
-// layout(set = 1, binding = 1) buffer AeroGrid {
-//     vec4 aerogrid[];
-// };
-// 
-// layout(set = 1, binding = 2) buffer VelGrid {
-//     vec4 velgrid[];
-// };
-
-layout(local_size_x = WORK_GROUP_SIZE, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = WORK_GROUP_SIZE_X, local_size_y = WORK_GROUP_SIZE_Y, local_size_z = WORK_GROUP_SIZE_Z) in;
 
 bool isMovable(vec4 point) {
     return point.w > 0.0;
+}
+
+vec4 winddirection = vec4(0.0, -1.0, -5.0, 0.0);
+vec3 origin_pos = vec3(-4.0, -2.0, -4.0);
+
+vec4 calculateWindForce(int p1, int p2) {
+    vec3 tangent = normalize((cur_pos[p1] - cur_pos[p2]).xyz);
+    vec3 windforce = hair_parameter.windspeed * abs(cross(tangent, winddirection.xyz)) * winddirection.xyz;
+    return vec4(windforce, 1.0);
+}
+
+vec4 calculateFriction(int p1, vec4 cur_vel) {
+    float step = float(GRID_DIMENSION) / float(GRID_RESOLUTION);
+    vec3 pos = cur_pos[p1].xyz - origin_pos;
+
+    float x = pos.x / step;
+    float y = pos.y / step;
+    float z = pos.z / step;
+
+    int idx = int(floor(pos.x / step));
+    int idy = int(floor(pos.y / step));
+    int idz = int(floor(pos.z / step));
+
+    idx = max(0, idx);
+    idx = min(idx, GRID_RESOLUTION - 1);
+    idy = max(0, idy);
+    idy = min(idy, GRID_RESOLUTION - 1);
+    idz = max(0, idz);
+    idz = min(idz, GRID_RESOLUTION - 1);
+
+    int grid_idx = (idz * GRID_RESOLUTION + idy) * GRID_RESOLUTION + idx;
+
+    vec4 grid_vel = vec4(grid_data[grid_idx].vel.xyz / grid_data[grid_idx].vel.w, 1.0);
+
+    vec4 force = grid_vel - cur_vel;
+    force.w = 1.0;
+
+    return force;
+}
+
+int mapGridLoc(int x, int y, int z) {
+    return (z * GRID_RESOLUTION + y) * GRID_RESOLUTION + x;
+}
+
+float getGridDensity(int x, int y, int z) {
+    return grid_data[mapGridLoc(x,y,z)].vel[3];
+}
+
+vec3 calculatePressureforce(ivec3 pos, vec3 apos){
+    int x = pos.x;
+    int y = pos.y;
+    int z = pos.z;
+
+    float fx =  (1.0 - apos.x) * (getGridDensity(x,y,z) - getGridDensity(x + 1,y,z)) + apos.x * (getGridDensity(x-1,y,z) - getGridDensity(x,y,z));
+    float fy =  (1.0 - apos.y) * (getGridDensity(x,y,z) - getGridDensity(x,y+1,z)) + apos.y * (getGridDensity(x,y-1,z) - getGridDensity(x,y,z));
+    float fz =  (1.0 - apos.z) * (getGridDensity(x,y,z) - getGridDensity(x,y,z+1)) + apos.z * (getGridDensity(x,y,z-1) - getGridDensity(x,y,z));
+
+    // float fx = apos.x * (getGridDensity(x,y,z) - getGridDensity(x + 1,y,z)) ;// + (1.0 - apos.x) * (getGridDensity(x-1,y,z) - getGridDensity(x,y,z));
+    // float fy = apos.y * (getGridDensity(x,y,z) - getGridDensity(x,y+1,z)) ;// + (1.0 - apos.y) * (getGridDensity(x,y-1,z) - getGridDensity(x,y,z));
+    // float fz = apos.z * (getGridDensity(x,y,z) - getGridDensity(x,y,z+1)) ;// + (1.0 - apos.z) * (getGridDensity(x,y,z-1) - getGri;// dDensity(x,y,z));
+
+    return vec3(fx, fy, fz);
+}
+
+vec4 calculatePressure(int i) {
+    float step = float(GRID_DIMENSION) / float(GRID_RESOLUTION);
+    vec3 pos = cur_pos[i].xyz - origin_pos;
+
+    float x = pos.x / step;
+    float y = pos.y / step;
+    float z = pos.z / step;
+
+    int idx = int(floor(pos.x / step));
+    int idy = int(floor(pos.y / step));
+    int idz = int(floor(pos.z / step));
+
+    idx = max(0, idx);
+    idx = min(idx, GRID_RESOLUTION - 1);
+    idy = max(0, idy);
+    idy = min(idy, GRID_RESOLUTION - 1);
+    idz = max(0, idz);
+    idz = min(idz, GRID_RESOLUTION - 1);
+
+    float ax = clamp(1.0 - abs(x - idx), 0.0, 1.0);
+    float ay = clamp(1.0 - abs(y - idy), 0.0, 1.0);
+    float az = clamp(1.0 - abs(z - idz), 0.0, 1.0);
+    ivec3 ipos = ivec3(idx, idy, idz);
+    vec3 apos = vec3(ax, ay, az);
+
+    vec3 force = calculatePressureforce(ipos, apos);
+
+    return vec4(force / step, 1.0);
 }
 
 void solveDistanceConstanint(int index0, int index1, float targetDistance) {
@@ -119,107 +216,242 @@ vec3 GetPointOnEllipsoid(Collider c, vec3 point) {
 	return vec3(c.transform * vec4(transformedPoint, 1.0));
 }
 
-void main() {
-	int threadIdx = int(gl_GlobalInvocationID.x);
+vec4 makeQuat(vec3 axis, float angle) {
+    vec4 quat = vec4(0.0);
+    float halfAngle = angle * 0.5;
+    quat.w = cos(halfAngle);
+    quat.xyz = axis * sin(halfAngle);
+    return quat;
+}
 
-    if (threadIdx > int(NUM_STRAND)) {
-        //return;
+vec4 quatInverse(vec4 quat) {
+    float lengthsqr = quat.x * quat.x + quat.y * quat.y + quat.z * quat.z + quat.w * quat.w;
+    if (lengthsqr < 0.0001) {
+        return vec4(0.0, 0.0, 0.0, 1.0);
     }
 
-    vec4 gravity = hair_parameter.gravityfactor * vec4(0.f, 9.8f, 0.f, 0.f);
+    quat.x = -quat.x / lengthsqr;
+    quat.y = -quat.y / lengthsqr;
+    quat.z = -quat.z / lengthsqr;
+    quat.w = quat.w / lengthsqr;
 
-    int idx = threadIdx * int(STRAND_LENGTH);
+    return quat;
+}
 
-    float dt = deltaTime * hair_parameter.timefactor;
+vec3 quatRotate(vec4 quat, vec3 vector) {
+    vec3 qvec = quat.xyz;
+    vec3 uv = cross(qvec, vector);
+    vec3 uuv = cross(qvec, uv);
+    uv *= (2.0f * quat.w);
+    uuv *= 2.0f;
 
-    float damping = hair_parameter.damping;
-	float stiffness = hair_parameter.stiffness;
+    return vector + uv + uuv;
+}
 
-    barrier();
+vec4 quatMultiple(vec4 qA, vec4 qB) {
+    vec4 q;
 
-    int grid_len = int(GRID_RESOLUTION) * int(GRID_RESOLUTION) * int(GRID_RESOLUTION);
-    if (threadIdx == 0) {
-        for (int i = 0; i < grid_len; i++) {
-            grid_data[i].vel = vec4(0.0f);
+    q.w = qA.w * qB.w - qA.x * qB.x - qA.y * qB.y - qA.z * qB.z;
+    q.x = qA.w * qB.x + qA.x * qB.w + qA.y * qB.z - qA.z * qB.y;
+    q.y = qA.w * qB.y + qA.y * qB.w + qA.z * qB.x - qA.x * qB.z;
+    q.z = qA.w * qB.z + qA.z * qB.w + qA.x * qB.y - qA.y * qB.x;
+
+    return q;
+}
+
+vec4 globalRotation[STRAND_LENGTH];
+vec4 localRotation[STRAND_LENGTH];
+vec4 refVector[STRAND_LENGTH];
+
+void prepare(int head, int tail) {
+
+    vec3 tangent = vec4(init_pos[head + 1] - init_pos[head]).xyz;
+
+    vec3 xAxis = vec3(1.0, 0.0, 0.0);
+
+    vec3 rotationAxis = cross(xAxis, tangent);
+    float angle = acos(dot(xAxis, normalize(tangent)));
+
+    globalRotation[0] = makeQuat(normalize(rotationAxis), angle);
+    localRotation[0]= globalRotation[0];
+
+    for (int j = 1; j < STRAND_LENGTH - 1; j++) {
+        vec3 tangent = vec4(init_pos[head + j + 1] - init_pos[head + j]).xyz;
+        vec4 inverseRotation = quatInverse(globalRotation[j - 1]);
+        vec3 localTangent = quatRotate(inverseRotation, tangent);
+
+        rotationAxis = cross(xAxis, normalize(localTangent));
+        angle = acos(dot(xAxis, normalize(localTangent)));
+
+        if (length(rotationAxis) > 0.001 && angle > 0.001) {
+            localRotation[j] = makeQuat(normalize(rotationAxis), angle);
+        } else {
+            localRotation[j] = vec4(0.0, 0.0, 0.0, 1.0);
         }
+
+        globalRotation[j] = quatMultiple(globalRotation[j - 1], localRotation[j]);
+        refVector[j-1] = vec4(localTangent, 0.0);
     }
+}
 
-    barrier();
+void integrate(int head, int tail, float dt) {
+    vec4 gravity = hair_parameter.gravityfactor * vec4(0.f, 9.8f, 0.f, 0.f);
+    float damping = hair_parameter.damping;
+    float friction= hair_parameter.friction;
 
-    for (int i = 1; i < STRAND_LENGTH; i++) {
+    for (int i = head + 1; i < tail; i++) {
+        vec4 curPos = cur_pos[i];
+        vec4 oldPos = old_pos[i];
 
-        vec4 curPos = cur_pos[idx + i];
-        vec4 oldPos = old_pos[idx + i];
+        vec4 cur_speed = (curPos - oldPos) * float(1.0 / dt);
 
-        vec4 acc = gravity; // + calculateWindForce(curPos) + calculateFriction(curPos) + calculateVolumetric(curPos);
+        vec4 acc = gravity + calculateWindForce(i - 1, i) + friction * 10.0 * calculateFriction(i, cur_speed) + hair_parameter.volume * calculatePressure(i);
+
+        acc.w = 1.0;
+
+        vec4 newPos = curPos + (1.0 - damping * 0.1) * (curPos - oldPos) + acc * dt * dt;
+        cur_pos[i] = newPos;
+        old_pos[i] = curPos;
+    }
+}
+
+void body_collision(int head, int tail, int times) {
+    for (int i = head + 1; i < tail; i++) {
+        vec4 curPos = cur_pos[i];
 
         vec4 penalty = vec4(0.0);
         for (int j = 0; j < COLLIDER_LENGTH; j++) {
             Collider c = colliders[j];
             if (EllipsoidCollision(c, curPos.xyz)) {
-                float k = 1900.0; // spring constant, as large as possible without exploding
+                float k = 1.0; // spring constant, as large as possible without exploding
                 float d = distance(GetPointOnEllipsoid(c, curPos.xyz), curPos.xyz);
                 vec3 normal = normalize(GetEllipsoidNormal(c, curPos.xyz)); // normal of collision surface at point of collision
                 penalty += vec4(k * d * normal, 1.0); // penalty spring force
             }
         }
-        acc = acc + penalty;
-
-        vec4 newPos = curPos +  (1.0 - damping) * (curPos - oldPos) + acc * dt * dt;
-        cur_pos[idx + i] = newPos;
-        old_pos[idx + i] = curPos;
+        cur_pos[i] = curPos + penalty;
     }
+}
 
-    // barrier();
+void constraint_orientation(int head, int tail, int times) {
+    float stiffness = hair_parameter.stiffness;
+    vec3 rotationAxis;
+    float angle;
+    vec3 xAxis = vec3(1.0, 0.0, 0.0);
 
-    // local shape
+    for (int i = 0; i < times; i++) {
+        vec4 globalR = globalRotation[0];
+        vec4 localR;
+        vec4 globalRinv;
 
-    barrier();
+        for (int j = head; j < tail - 1; j++) {
+            vec3 position = cur_pos[j + 1].xyz;
+            vec3 localPos;
+            vec3 temp = refVector[j - head].xyz;
 
-    // constraint
+            if (length(temp) < 0.001) {
+                localPos = temp;
+            } else {
+                localPos = length((cur_pos[j + 1] - cur_pos[j]).xyz) * normalize(temp);
+            }
+
+            localPos = temp;
+
+            vec3 targetPos = quatRotate(globalR, localPos) + cur_pos[j].xyz;
+            vec3 delta = stiffness * (targetPos - position);
+
+            if (isMovable(cur_pos[j + 1])) {
+                if (isMovable(cur_pos[j])) {
+                    cur_pos[j].xyz -= 0.5 * delta;
+                    cur_pos[j + 1].xyz += 0.5 * delta;
+                } else {
+                    cur_pos[j + 1].xyz += 1.0 * delta;
+                }
+            }
+
+            globalRinv = quatInverse(globalR);
+            vec3 tangent = normalize((cur_pos[j + 1] - cur_pos[j]).xyz);
+            vec3 localTangent = normalize(quatRotate(globalRinv, tangent));
+
+            rotationAxis = cross(xAxis, localTangent);
+            angle = acos(dot(xAxis, normalize(localTangent)));
+
+            if (length(rotationAxis) > 0.001 && angle > 0.001) {
+                localR = makeQuat(normalize(rotationAxis), angle);
+                globalR = quatMultiple(globalR, localR);
+            }
+        }
+    }
+}
+void constraint_length(int head, int tail, int times) {
     float local_distance = 0.0;
-    int local_idx = idx;
-    for (int i = 0; i < 10; i++) {
-        for (int j = 1; j < STRAND_LENGTH; j++) {
-            local_idx = idx + j;
-            local_distance = length(vec4(init_pos[local_idx] - init_pos[local_idx - 1]).xyz);
-            if (j % 2 == 0) {
-                solveDistanceConstanint(local_idx - 1, local_idx, local_distance);
-            }
+
+    for (int i = 0; i < times; i++) {
+        for (int j = head; j < tail - 1; j+= 2) {
+            local_distance = length(vec4(init_pos[j + 1] - init_pos[j]).xyz);
+            solveDistanceConstanint(j + 1, j, local_distance);
         }
-        for (int j = 1; j < STRAND_LENGTH; j++) {
-            local_idx = idx + j;
-            local_distance = length(vec4(init_pos[local_idx] - init_pos[local_idx - 1]).xyz);
-            if (j % 2 == 1) {
-                solveDistanceConstanint(local_idx - 1, local_idx, local_distance);
-            }
+        for (int j = head + 1; j < tail - 1; j+= 2) {
+            local_distance = length(vec4(init_pos[j + 1] - init_pos[j]).xyz);
+            solveDistanceConstanint(j + 1, j, local_distance);
         }
     }
+}
 
-    barrier();
+float adaptive_time_step() {
+    return 0.0;
+}
 
-    idx = threadIdx * int(STRAND_LENGTH);
-    float step = float(GRID_DIMENSION) / float(GRID_RESOLUTION);
-    vec3 origin_pos = vec3(-4.0, -2.0, -4.0);
+float fixed_time_step(float total_time) {
+    return total_time * hair_parameter.timefactor;
+}
 
-    for (int i = 0; i < STRAND_LENGTH; i++) {
-        vec3 pos = cur_pos[idx + i].xyz - origin_pos;
-        int x = int(floor(pos.x / step));
-        int y = int(floor(pos.y / step));
-        int z = int(floor(pos.z / step));
-        int grid_idx = (z * GRID_RESOLUTION + y) * GRID_RESOLUTION + x;
-        vec3 velc = (cur_pos[idx + i] - old_pos[idx + i]).xyz * (1.0 / dt);
+void iterate (int head, int tail, float total_time) {
+    float time = 0.0;
+    float dt = fixed_time_step(total_time);
+    uint iteration = 0;
 
-        grid_data[grid_idx].vel.w += 1.0;
-        grid_data[grid_idx].vel.xyz = velc;
+    // evaluate total_time
+    // while ((time) < total_time) {
+        // obtain time step
+        if (iteration < MAX_ITERATE_NUM) {
+            dt = min(fixed_time_step(total_time), total_time - time);
+            if (total_time - time - dt < 0.001) {
+                dt = total_time - time;
+            }
+        } else {
+            dt = total_time - time;
+        }
+        // TODO: better add a velocity term to record the velc
+        time += total_time;
+
+        // integrate
+        integrate(head, tail, dt);
+
+        for (int con = 0; con < 5; con ++) {
+            // solve orientation constraint
+            constraint_orientation(head, tail, 1);
+
+            // solve length constraint
+            constraint_length(head, tail, 1);
+
+            // solve the hair-body collision
+            body_collision(head, tail, 1);
+        }
+    // }
+}
+
+void main() {
+    int threadIdx = int((gl_GlobalInvocationID.z * WORK_GROUP_SIZE_Y + gl_GlobalInvocationID.y) * WORK_GROUP_SIZE_X + gl_GlobalInvocationID.x);
+
+    if (threadIdx > int(NUM_STRAND)) {
+        return;
     }
 
-    barrier();
+    int strandRoot = threadIdx * int(STRAND_LENGTH);
+    int strandTail = strandRoot + STRAND_LENGTH;
 
-    // calculate force
-    // integrate position
-    // collision detect
-    // collision resolve
-    // grid velicity smooth
-    // fill new velgrid & volumegrid;
+    prepare(strandRoot, strandTail);
+
+    iterate(strandRoot, strandTail, deltaTime);
 }

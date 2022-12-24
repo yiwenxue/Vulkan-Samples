@@ -11,8 +11,6 @@
 #include "api_vulkan_sample.h"
 #include "vulkan/vulkan_core.h"
 
-#define NUM_CURVE_POINTS 10
-
 namespace hair_system
 {
 
@@ -190,6 +188,10 @@ class Hair
 
 	~Hair();
 
+	void genStraightHair();
+
+	void genCurlyHair();
+
 	void updateUBO();
 
 	void reset();
@@ -224,9 +226,11 @@ class Hair
 
 	DrawIndirect indirect_data;
 
-	float    hairLength{2};
-	uint32_t numStrands{5000};
+	float    hairLength{2.0f};
+	uint32_t numStrands{5120};
 	uint32_t strandLength{20};
+
+	std::string filename;
 
 	bool is_instanced{false};
 

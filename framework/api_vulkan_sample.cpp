@@ -80,8 +80,8 @@ bool ApiVulkanSample::prepare(vkb::Platform &platform)
 
 void ApiVulkanSample::prepare_render_context()
 {
-	get_render_context().set_present_mode_priority({VK_PRESENT_MODE_MAILBOX_KHR,
-	                                                VK_PRESENT_MODE_IMMEDIATE_KHR,
+	get_render_context().set_present_mode_priority({VK_PRESENT_MODE_IMMEDIATE_KHR,
+	                                                VK_PRESENT_MODE_MAILBOX_KHR,
 	                                                VK_PRESENT_MODE_FIFO_KHR});
 
 	get_render_context().set_surface_format_priority({{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
@@ -89,7 +89,7 @@ void ApiVulkanSample::prepare_render_context()
 	                                                  {VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
 	                                                  {VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}});
 
-	get_render_context().request_present_mode(VK_PRESENT_MODE_MAILBOX_KHR);
+	get_render_context().request_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR);
 
 	get_render_context().request_image_format(VK_FORMAT_B8G8R8A8_UNORM);
 
@@ -972,7 +972,7 @@ Texture ApiVulkanSample::load_texture_array(const std::string &file)
 	// Setup buffer copy regions for each mip level
 	std::vector<VkBufferImageCopy> buffer_copy_regions;
 
-	auto &      mipmaps = texture.image->get_mipmaps();
+	auto       &mipmaps = texture.image->get_mipmaps();
 	const auto &layers  = texture.image->get_layers();
 
 	auto &offsets = texture.image->get_offsets();
@@ -1073,7 +1073,7 @@ Texture ApiVulkanSample::load_texture_cubemap(const std::string &file)
 	// Setup buffer copy regions for each mip level
 	std::vector<VkBufferImageCopy> buffer_copy_regions;
 
-	auto &      mipmaps = texture.image->get_mipmaps();
+	auto       &mipmaps = texture.image->get_mipmaps();
 	const auto &layers  = texture.image->get_layers();
 
 	auto &offsets = texture.image->get_offsets();
@@ -1173,7 +1173,7 @@ void ApiVulkanSample::draw_model(std::unique_ptr<vkb::sg::SubMesh> &model, VkCom
 	VkDeviceSize offsets[1] = {0};
 
 	const auto &vertex_buffer = model->vertex_buffers.at("vertex_buffer");
-	auto &      index_buffer  = model->index_buffer;
+	auto       &index_buffer  = model->index_buffer;
 
 	vkCmdBindVertexBuffers(command_buffer, 0, 1, vertex_buffer.get(), offsets);
 	vkCmdBindIndexBuffer(command_buffer, index_buffer->get_handle(), 0, model->index_type);

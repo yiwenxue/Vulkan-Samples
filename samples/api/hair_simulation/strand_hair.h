@@ -41,8 +41,9 @@ class StrandHair : public HairMethod
 	VkDescriptorSetLayout collider_ds_layout;        // collider data
 
 	VkPipelineLayout pipeline_layout;
+	VkPipeline       pipeline_initialize;
+	VkPipeline       pipeline_grid;
 	VkPipeline       pipeline_integrate;
-	VkPipeline       pipeline_constraint;
 
 	LocalUBO                           _local_ubo;
 	std::unique_ptr<vkb::core::Buffer> _local_buffer;

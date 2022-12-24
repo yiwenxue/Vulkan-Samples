@@ -1,0 +1,61 @@
+vec4 acceleration() {
+
+}
+
+void integrate(int head, int tail, float dt) {
+    for (int i = head + 1; i < tail; i++) {
+        vec4 pos = particle[i].pos;
+        vec4 prev_pos = particle[i].prev_pos;
+
+        vec4 acc = vec4(0.0, 9.8, 0.0, 0.0);
+        
+        if (isMovable(pos)) {
+            particle[i].pos = 2.0 * pos - prev_pos + acc * dt * dt;
+            particle[i].prev_pos = pos;
+        }
+    }
+}
+
+void integrate(int head, int tail, float dt) {
+    for (int i = head + 1; i < tail; i++) {
+        vec4 pos = particle[i].pos;
+        vec4 prev_pos = particle[i].prev_pos;
+
+        vec4 acc = gravity + windforce(i-1, i) + friction(i) + volume_preserve(i);
+        
+        if (isMovable(pos)) {
+            particle[i].pos = 2.0 * pos - prev_pos + acc * dt * dt;
+            particle[i].prev_pos = pos;
+        }
+    }
+}
+
+void iterate(int head, int tail, float dt) {
+    integrate(head, tail, dt);
+
+    for (int i = 0; i < CONSTRAINT_LOOP; i ++) {
+        local_length(head, tail);
+    }
+}
+
+void iterate(int head, int tail, float dt) {
+    integrate(head, tail, dt);
+
+    for (int i = 0; i < CONSTRAINT_LOOP; i ++) {
+        local_length(head, tail);
+
+        body_collision(head, tail);
+    }
+}
+
+void iterate(int head, int tail, float dt) {
+    integrate(head, tail, dt);
+
+    for (int i = 0; i < CONSTRAINT_LOOP; i ++) {
+        local_orientation(head, tail);
+
+        local_length(head, tail);
+
+        body_collision(head, tail);
+    }
+}

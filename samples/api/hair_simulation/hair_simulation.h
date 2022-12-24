@@ -44,19 +44,23 @@ namespace hair_system
 class HairSimulation : public ApiVulkanSample
 {
   public:
-	int32_t                     hair_method{0};
+	int32_t                  hair_method{0};
+	std::vector<std::string> hair_system_name{};
+
 	std::vector<HairSystem *>   hair_systems{};
-	std::vector<std::string>    hair_system_name{};
 	std::unique_ptr<Renderer>   render_system;
 	std::unique_ptr<HairSystem> hair_system;
+
+	int32_t                  hair_style{0};
+	std::vector<std::string> hair_style_name{};
 
 	bool draw_grid{false};
 	bool draw_head{true};
 	bool draw_hair{true};
 	bool pause_simulation{false};
 
-	HairUBO hair_data{0.01, 0.01, -1.0, 1.0};
-	HairUBO ori_hair_data{0.01, 0.01, -1.0, 1.0};
+	HairUBO hair_data{0.01, 0.01, 0.01, -1.0, 1.0, 0.0, 0.1};
+	HairUBO ori_hair_data{0.01, 0.01, 0.01, -1.0, 1.0, 0.0, 0.1};
 
 	std::unique_ptr<GeomPipeline>       geom_render;
 	std::unique_ptr<HairPipeline>       hair_render;

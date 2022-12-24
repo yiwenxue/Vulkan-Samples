@@ -154,7 +154,7 @@ class ApiVulkanSample : public vkb::VulkanSample
 	std::vector<VkFence> wait_fences;
 
 	/**
-	 * @brief Populates the swapchain_buffers vector with the image and imageviews 
+	 * @brief Populates the swapchain_buffers vector with the image and imageviews
 	 */
 	void create_swapchain_buffers();
 
@@ -289,7 +289,7 @@ class ApiVulkanSample : public vkb::VulkanSample
 	VkPipelineShaderStageCreateInfo load_shader(const std::string &file, VkShaderStageFlagBits stage);
 
 	/**
-	 * @brief Updates the overlay 
+	 * @brief Updates the overlay
 	 * @param delta_time The time taken since the last frame
 	 */
 	void update_overlay(float delta_time);
@@ -301,7 +301,7 @@ class ApiVulkanSample : public vkb::VulkanSample
 	void draw_ui(const VkCommandBuffer command_buffer);
 
 	/**
-	 * @brief Prepare the frame for workload submission, acquires the next image from the swap chain and 
+	 * @brief Prepare the frame for workload submission, acquires the next image from the swap chain and
 	 *        sets the default wait and signal semaphores
 	 */
 	void prepare_frame();
@@ -369,8 +369,8 @@ class ApiVulkanSample : public vkb::VulkanSample
 	glm::vec3 camera_pos = glm::vec3();
 	glm::vec2 mouse_pos;
 
-	std::string title       = "Vulkan Example";
-	std::string name        = "vulkanExample";
+	std::string title = "Physically based hair simulation";
+	std::string name  = "Hair Simulation";
 
 	struct
 	{

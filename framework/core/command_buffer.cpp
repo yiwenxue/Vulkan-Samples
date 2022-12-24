@@ -594,7 +594,7 @@ void CommandBuffer::flush_descriptor_state(VkPipelineBindPoint pipeline_bind_poi
 		for (auto &resource_set_it : resource_binding_state.get_resource_sets())
 		{
 			uint32_t descriptor_set_id = resource_set_it.first;
-			auto &   resource_set      = resource_set_it.second;
+			auto    &resource_set      = resource_set_it.second;
 
 			// Don't update resource set if it's not in the update list OR its state hasn't changed
 			if (!resource_set.is_dirty() && (update_descriptor_sets.find(descriptor_set_id) == update_descriptor_sets.end()))

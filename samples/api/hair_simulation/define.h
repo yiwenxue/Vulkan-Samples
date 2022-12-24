@@ -26,6 +26,12 @@ enum class HairSimuMethod
 	HYBRID,
 };
 
+enum class HairStyle : uint32_t
+{
+	StraitHair,
+	CurlyHair,
+};
+
 struct GlobalUBO
 {
 	glm::mat4 view;
@@ -47,9 +53,12 @@ struct TimeUBO
 struct HairUBO
 {
 	float stiffness;
+	float friction;
 	float damping;
 	float gravityfactor;
 	float timefactor;
+	float windspeed;
+	float volume;
 };
 
 }        // namespace hair_system

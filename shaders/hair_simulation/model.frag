@@ -1,4 +1,4 @@
-#version 320 es
+#version 450
 
 precision highp float;
 
@@ -13,5 +13,6 @@ layout(location = 0) out vec4 o_color;
 
 void main(void)
 {
-    o_color = texture(u_texture, uv);
+    vec2 newUV = vec2(uv.x, 1.0 - uv.y);
+    o_color = texture(u_texture, newUV);
 }

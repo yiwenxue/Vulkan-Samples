@@ -29,7 +29,7 @@ namespace
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_utils_messenger_callback(VkDebugUtilsMessageSeverityFlagBitsEXT message_severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                               const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
-                                                              void *                                      user_data)
+                                                              void                                       *user_data)
 {
 	// Log debug messge
 	if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
@@ -67,7 +67,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags
 }
 #endif
 
-bool validate_layers(const std::vector<const char *> &     required,
+bool validate_layers(const std::vector<const char *>      &required,
                      const std::vector<VkLayerProperties> &available)
 {
 	for (auto layer : required)
@@ -129,9 +129,9 @@ std::vector<const char *> get_optimal_validation_layers(const std::vector<VkLaye
 	return {};
 }
 
-Instance::Instance(const std::string &                           application_name,
+Instance::Instance(const std::string                            &application_name,
                    const std::unordered_map<const char *, bool> &required_extensions,
-                   const std::vector<const char *> &             required_validation_layers,
+                   const std::vector<const char *>              &required_validation_layers,
                    bool                                          headless,
                    uint32_t                                      api_version)
 {
@@ -259,7 +259,7 @@ Instance::Instance(const std::string &                           application_nam
 
 	app_info.pApplicationName   = application_name.c_str();
 	app_info.applicationVersion = 0;
-	app_info.pEngineName        = "Vulkan Samples";
+	app_info.pEngineName        = "Dome";
 	app_info.engineVersion      = 0;
 	app_info.apiVersion         = api_version;
 

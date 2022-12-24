@@ -1,0 +1,90 @@
+#version 450
+
+#define WORK_GROUP_SIZE_X 50
+#define WORK_GROUP_SIZE_Y 1
+#define WORK_GROUP_SIZE_Z 1
+
+#define NUM_STRAND 5120
+#define STRAND_LENGTH 20
+#define COLLIDER_LENGTH 6
+
+#define LOCAL_SHAPE_LOOP_NUM 5
+#define LENGTH_LOOP_NUM 5
+
+#define GRID_DIMENSION 8
+#define GRID_RESOLUTION 50
+
+struct Particle {
+    vec4 pos;
+    vec4 oldpos;
+    vec4 velc;
+};
+
+struct Collider {
+	mat4 transform;
+	mat4 inv;
+	mat4 invTrans;
+};
+
+struct GridStruct {
+    vec4 pos;
+    vec4 vel;
+};
+
+layout(set = 0, binding = 0) uniform GlobalUniform {
+    mat4 view;
+    mat4 projection;
+    vec4 view_dir;
+} global_uniform;
+
+layout(set = 0, binding = 1) uniform TimeUniform {
+    float deltaTime;
+    float totalTime;
+};
+
+layout(set = 1, binding = 0) uniform LocalUniform {
+    mat4 model;
+} local_uniform;
+
+layout(set = 2, binding = 0) buffer InitPos {
+    vec4 init_pos[];
+};
+
+layout(set = 2, binding = 1) buffer Pos {
+    vec4 cur_pos[];
+};
+
+layout(set = 2, binding = 2) buffer OldPos {
+    vec4 old_pos[];
+};
+
+layout(set = 3, binding = 0) buffer GridData {
+    GridStruct grid_data[];
+};
+
+layout(set = 4, binding = 0) uniform HairParameters {
+	float stiffness;
+	float friction;
+	float damping;
+	float gravityfactor;
+	float timefactor;
+	float windspeed;
+	float volume;
+} hair_parameter;
+
+layout(set = 5, binding = 0) buffer Colliders {
+    Collider colliders[];
+};
+
+layout(local_size_x = WORK_GROUP_SIZE_X, local_size_y = 1, local_size_z = 1) in;
+
+void main() {
+	int threadIdx = int(gl_GlobalInvocationID.x);
+    int grid_len = int(GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION);
+
+    int idx = threadIdx;
+    for (;idx < grid_len; ) {
+        grid_data[idx].vel = vec4(0.0f);
+        idx += WORK_GROUP_SIZE_X;
+    }
+}

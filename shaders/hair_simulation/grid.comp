@@ -1,0 +1,135 @@
+#version 450
+
+#extension GL_EXT_shader_atomic_float : require
+
+#define WORK_GROUP_SIZE_X 256
+#define WORK_GROUP_SIZE_Y 1
+#define WORK_GROUP_SIZE_Z 1
+
+#define NUM_STRAND 5120
+#define STRAND_LENGTH 20
+#define COLLIDER_LENGTH 6
+
+#define LOCAL_SHAPE_LOOP_NUM 10
+#define LENGTH_LOOP_NUM 10
+
+#define GRID_DIMENSION 8
+#define GRID_RESOLUTION 50
+
+struct Particle {
+    vec4 pos;
+    vec4 oldpos;
+    vec4 velc;
+};
+
+struct Collider {
+	mat4 transform;
+	mat4 inv;
+	mat4 invTrans;
+};
+
+struct GridStruct {
+    vec4 pos;
+    vec4 vel;
+};
+
+layout(set = 0, binding = 0) uniform GlobalUniform {
+    mat4 view;
+    mat4 projection;
+    vec4 view_dir;
+} global_uniform;
+
+layout(set = 0, binding = 1) uniform TimeUniform {
+    float deltaTime;
+    float totalTime;
+};
+
+layout(set = 1, binding = 0) uniform LocalUniform {
+    mat4 model;
+} local_uniform;
+
+layout(set = 2, binding = 0) buffer InitPos {
+    vec4 init_pos[];
+};
+
+layout(set = 2, binding = 1) buffer Pos {
+    vec4 cur_pos[];
+};
+
+layout(set = 2, binding = 2) buffer OldPos {
+    vec4 old_pos[];
+};
+
+layout(set = 3, binding = 0) buffer GridData {
+    GridStruct grid_data[];
+};
+
+layout(set = 4, binding = 0) uniform HairParameters {
+	float stiffness;
+	float friction;
+	float damping;
+	float gravityfactor;
+	float timefactor;
+	float windspeed;
+	float volume;
+} hair_parameter;
+
+layout(set = 5, binding = 0) buffer Colliders {
+    Collider colliders[];
+};
+
+layout(local_size_x = WORK_GROUP_SIZE_X, local_size_y = WORK_GROUP_SIZE_Y, local_size_z = WORK_GROUP_SIZE_Z) in;
+
+void main() {
+	int threadIdx = int((gl_GlobalInvocationID.z * WORK_GROUP_SIZE_Y + gl_GlobalInvocationID.y) * WORK_GROUP_SIZE_X + gl_GlobalInvocationID.x);
+
+    if (threadIdx > int(NUM_STRAND)) {
+        return;
+    }
+
+    int grid_len = int(GRID_RESOLUTION * GRID_RESOLUTION * GRID_RESOLUTION);
+
+    int idx = threadIdx * int(STRAND_LENGTH);
+
+    float dt = deltaTime * hair_parameter.timefactor;
+
+    barrier();
+
+    idx = threadIdx * int(STRAND_LENGTH);
+    float step = float(GRID_DIMENSION) / float(GRID_RESOLUTION);
+    vec3 origin_pos = vec3(-4.0, -2.0, -4.0);
+
+    for (int i = 0; i < STRAND_LENGTH; i++) {
+        vec3 pos = cur_pos[idx + i].xyz - origin_pos;
+
+        float x = pos.x / step;
+        float y = pos.y / step;
+        float z = pos.z / step;
+
+        int idx = int(floor(pos.x / step));
+        int idy = int(floor(pos.y / step));
+        int idz = int(floor(pos.z / step));
+
+        idx = max(0, idx);
+        idx = min(idx, GRID_RESOLUTION - 1);
+        idy = max(0, idy);
+        idy = min(idy, GRID_RESOLUTION - 1);
+        idz = max(0, idz);
+        idz = min(idz, GRID_RESOLUTION - 1);
+
+        int grid_idx = (idz * GRID_RESOLUTION + idy) * GRID_RESOLUTION + idx;
+
+        vec3 velc = (cur_pos[idx + i] - old_pos[idx + i]).xyz * (1.0 / dt);
+
+        float xWeight = clamp(1.0 - abs(x - idx), 0.0, 1.0);
+        float yWeight = clamp(1.0 - abs(y - idy), 0.0, 1.0);
+        float zWeight = clamp(1.0 - abs(z - idz), 0.0, 1.0);
+
+        float weight = xWeight * yWeight * zWeight;
+
+        atomicAdd(grid_data[grid_idx].vel[0], velc.x * weight);
+        atomicAdd(grid_data[grid_idx].vel[1], velc.y * weight);
+        atomicAdd(grid_data[grid_idx].vel[2], velc.z * weight);
+        atomicAdd(grid_data[grid_idx].vel[3], weight);
+    }
+}

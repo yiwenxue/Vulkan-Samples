@@ -13,8 +13,9 @@ StrandHair::StrandHair(vkb::Device *device, HairSystem *hair_system) :
 
 StrandHair::~StrandHair()
 {
+	vkDestroyPipeline(get_hair_system()->get_device()->get_handle(), pipeline_initialize, nullptr);
+	vkDestroyPipeline(get_hair_system()->get_device()->get_handle(), pipeline_grid, nullptr);
 	vkDestroyPipeline(get_hair_system()->get_device()->get_handle(), pipeline_integrate, nullptr);
-	vkDestroyPipeline(get_hair_system()->get_device()->get_handle(), pipeline_constraint, nullptr);
 
 	vkDestroyDescriptorSetLayout(get_hair_system()->get_device()->get_handle(), descriptor_set_layout, nullptr);
 	vkDestroyDescriptorSetLayout(get_hair_system()->get_device()->get_handle(), user_ds_layout, nullptr);
@@ -156,22 +157,26 @@ void StrandHair::prepare_compute_descriptor_sets()
 
 void StrandHair::prepare_compute_pipeline()
 {
-	// integrate
-
 	auto pipeline_cache = *get_hair_system()->get_pipeline_cache();
 
 	auto *device = get_hair_system()->get_device();
 
 	VkComputePipelineCreateInfo compute_pipeline_create_info = vkb::initializers::compute_pipeline_create_info(pipeline_layout, 0);
 
+	// initialize
+	compute_pipeline_create_info.stage = get_hair_system()->load_shader("hair_simulation/initialize.comp", VK_SHADER_STAGE_COMPUTE_BIT);
+
+	VK_CHECK(vkCreateComputePipelines(device->get_handle(), pipeline_cache, 1, &compute_pipeline_create_info, nullptr, &pipeline_initialize));
+
+	// grid
+	compute_pipeline_create_info.stage = get_hair_system()->load_shader("hair_simulation/grid.comp", VK_SHADER_STAGE_COMPUTE_BIT);
+
+	VK_CHECK(vkCreateComputePipelines(device->get_handle(), pipeline_cache, 1, &compute_pipeline_create_info, nullptr, &pipeline_grid));
+
+	// integrate
 	compute_pipeline_create_info.stage = get_hair_system()->load_shader("hair_simulation/integrate.comp", VK_SHADER_STAGE_COMPUTE_BIT);
 
 	VK_CHECK(vkCreateComputePipelines(device->get_handle(), pipeline_cache, 1, &compute_pipeline_create_info, nullptr, &pipeline_integrate));
-
-	// constraint
-	compute_pipeline_create_info.stage = get_hair_system()->load_shader("hair_simulation/integrate.comp", VK_SHADER_STAGE_COMPUTE_BIT);
-
-	VK_CHECK(vkCreateComputePipelines(device->get_handle(), pipeline_cache, 1, &compute_pipeline_create_info, nullptr, &pipeline_constraint));
 }
 
 void StrandHair::prepare_compute_uniform_buffers()
@@ -212,7 +217,7 @@ bool StrandHair::prepare()
 
 void StrandHair::simulate(VkCommandBuffer cmd, Scene *scene, float delta_time)
 {
-	uint32_t group_size = 128;
+	uint32_t group_size = 256;
 
 	if (scene->get_hairs().size() == 0 || scene->get_colliders().size() == 0 || scene->get_grids().size() == 0)
 	{
@@ -235,37 +240,78 @@ void StrandHair::simulate(VkCommandBuffer cmd, Scene *scene, float delta_time)
 	_local_ubo.model = hair->model_matrix;
 	_local_buffer->convert_and_update(_local_ubo);
 
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_integrate);
-
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, sets.size(), sets.data(), 0, NULL);
-
-	vkCmdDispatch(cmd, hair->numStrands / group_size + 1, 1, 1);
-
 	//// inter barrier
-	// VkBufferMemoryBarrier bufferBarrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-	// bufferBarrier.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT;
-	// bufferBarrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
-	// bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	// bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	// bufferBarrier.buffer              = hair->pos_buffer->get_handle();
-	// bufferBarrier.offset              = 0;
-	// bufferBarrier.size                = hair->pos_buffer->get_size();
+	std::vector<VkBufferMemoryBarrier> bufferBarriers{
+	    VkBufferMemoryBarrier{
+	        VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        nullptr,
+	        VK_ACCESS_SHADER_WRITE_BIT,
+	        VK_ACCESS_SHADER_READ_BIT,
+	        VK_QUEUE_FAMILY_IGNORED,
+	        VK_QUEUE_FAMILY_IGNORED,
+	        hair->pos_buffer->get_handle(),
+	        0,
+	        hair->pos_buffer->get_size()},
+	    VkBufferMemoryBarrier{
+	        VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        nullptr,
+	        VK_ACCESS_SHADER_WRITE_BIT,
+	        VK_ACCESS_SHADER_READ_BIT,
+	        VK_QUEUE_FAMILY_IGNORED,
+	        VK_QUEUE_FAMILY_IGNORED,
+	        grids->instance_buffer->get_handle(),
+	        0,
+	        grids->instance_buffer->get_size()},
+	};
 
-	// vkCmdPipelineBarrier(
-	//     cmd,
-	//     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-	//     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-	//     VK_FLAGS_NONE,
-	//     0, nullptr,
-	//     1, &bufferBarrier,
-	//     0, nullptr);
+	vkCmdPipelineBarrier(
+	    cmd,
+	    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_FLAGS_NONE,
+	    0, nullptr,
+	    bufferBarriers.size(),
+	    bufferBarriers.data(),
+	    0, nullptr);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_initialize);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, sets.size(), sets.data(), 0, NULL);
+	vkCmdDispatch(cmd, 1, 1, 1);
 
-	//// dispatch
-	// vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_constraint);
+	vkCmdPipelineBarrier(
+	    cmd,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_FLAGS_NONE,
+	    0, nullptr,
+	    bufferBarriers.size(),
+	    bufferBarriers.data(),
+	    0, nullptr);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_grid);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, sets.size(), sets.data(), 0, NULL);
+	vkCmdDispatch(cmd, (hair->numStrands + group_size - 1) / group_size, 1, 1);
 
-	// vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, sets.size(), sets.data(), 0, NULL);
-	//// dispatch
-	// vkCmdDispatch(cmd, hair->numStrands / group_size + 1, 1, 1);
+	vkCmdPipelineBarrier(
+	    cmd,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_FLAGS_NONE,
+	    0, nullptr,
+	    bufferBarriers.size(),
+	    bufferBarriers.data(),
+	    0, nullptr);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_integrate);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_layout, 0, sets.size(), sets.data(), 0, NULL);
+	vkCmdDispatch(cmd, (hair->numStrands + group_size - 1) / group_size, 1, 1);
+
+	vkCmdPipelineBarrier(
+	    cmd,
+	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	    VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+	    VK_FLAGS_NONE,
+	    0, nullptr,
+	    bufferBarriers.size(),
+	    bufferBarriers.data(),
+	    0, nullptr);
 
 	printf("dispatch\n");
 }
